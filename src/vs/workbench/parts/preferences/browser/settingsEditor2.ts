@@ -16,7 +16,6 @@ import { DefaultTreestyler } from 'vs/base/parts/tree/browser/treeDefaults';
 import 'vs/css!./media/settingsEditor2';
 import { localize } from 'vs/nls';
 import { ConfigurationTarget, IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { IEditor } from 'vs/platform/editor/common/editor';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { WorkbenchTree } from 'vs/platform/list/browser/listService';
 import { ILogService } from 'vs/platform/log/common/log';
@@ -25,13 +24,15 @@ import { editorBackground, foreground, listActiveSelectionBackground, listInacti
 import { attachButtonStyler, attachStyler } from 'vs/platform/theme/common/styler';
 import { ICssStyleCollector, ITheme, IThemeService, registerThemingParticipant } from 'vs/platform/theme/common/themeService';
 import { BaseEditor } from 'vs/workbench/browser/parts/editor/baseEditor';
-import { EditorOptions } from 'vs/workbench/common/editor';
+import { EditorOptions, IEditor } from 'vs/workbench/common/editor';
 import { SearchWidget, SettingsTarget, SettingsTargetsWidget } from 'vs/workbench/parts/preferences/browser/preferencesWidgets';
 import { ISettingsEditorViewState, SearchResultIdx, SearchResultModel, SettingsAccessibilityProvider, SettingsDataSource, SettingsRenderer, SettingsTreeController, SettingsTreeFilter, TreeElement } from 'vs/workbench/parts/preferences/browser/settingsTree';
 import { IPreferencesSearchService, ISearchProvider } from 'vs/workbench/parts/preferences/common/preferences';
 import { IPreferencesService, ISearchResult, ISettingsEditorModel } from 'vs/workbench/services/preferences/common/preferences';
 import { SettingsEditor2Input } from 'vs/workbench/services/preferences/common/preferencesEditorInput';
 import { DefaultSettingsEditorModel } from 'vs/workbench/services/preferences/common/preferencesModels';
+import { CancellationToken } from 'vs/base/common/cancellation';
+import { IEnvironmentService } from 'vs/platform/environment/common/environment';
 
 const $ = DOM.$;
 
@@ -72,7 +73,8 @@ export class SettingsEditor2 extends BaseEditor {
 		@IPreferencesService private preferencesService: IPreferencesService,
 		@IInstantiationService private instantiationService: IInstantiationService,
 		@IPreferencesSearchService private preferencesSearchService: IPreferencesSearchService,
-		@ILogService private logService: ILogService
+		@ILogService private logService: ILogService,
+		@IEnvironmentService private environmentService: IEnvironmentService
 	) {
 		super(SettingsEditor2.ID, telemetryService, themeService);
 		this.delayedModifyLogging = new Delayer<void>(1000);
@@ -91,13 +93,10 @@ export class SettingsEditor2 extends BaseEditor {
 		this.createBody(prefsEditorElement);
 	}
 
-	setInput(input: SettingsEditor2Input, options: EditorOptions): TPromise<void> {
-		const oldInput = this.input;
-		return super.setInput(input)
+	setInput(input: SettingsEditor2Input, options: EditorOptions, token: CancellationToken): Thenable<void> {
+		return super.setInput(input, options, token)
 			.then(() => {
-				if (!input.matches(oldInput)) {
-					this.render();
-				}
+				this.render(token);
 			});
 	}
 
@@ -188,7 +187,10 @@ export class SettingsEditor2 extends BaseEditor {
 		const bodyContainer = DOM.append(parent, $('.settings-body'));
 
 		this.createList(bodyContainer);
-		this.createFeedbackButton(bodyContainer);
+
+		if (this.environmentService.appQuality !== 'stable') {
+			this.createFeedbackButton(bodyContainer);
+		}
 	}
 
 	private createList(parent: HTMLElement): void {
@@ -377,10 +379,14 @@ export class SettingsEditor2 extends BaseEditor {
 		this.telemetryService.publicLog('settingsEditor.settingModified', data);
 	}
 
-	private render(): TPromise<any> {
+	private render(token: CancellationToken): TPromise<any> {
 		if (this.input) {
 			return this.input.resolve()
 				.then((model: DefaultSettingsEditorModel) => {
+					if (token.isCancellationRequested) {
+						return void 0;
+					}
+
 					this.defaultSettingsEditorModel = model;
 					if (!this.settingsTree.getInput()) {
 						this.settingsTree.setInput(this.defaultSettingsEditorModel);

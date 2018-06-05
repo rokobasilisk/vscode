@@ -4,12 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as fs from 'fs';
-import { CancellationTokenSource, Disposable, TextDocument, TextDocumentChangeEvent, TextDocumentContentChangeEvent, Uri, workspace } from 'vscode';
+import { CancellationTokenSource, Disposable, TextDocument, TextDocumentChangeEvent, TextDocumentContentChangeEvent, Uri, workspace, EventEmitter } from 'vscode';
 import * as Proto from '../protocol';
 import { ITypeScriptServiceClient } from '../typescriptService';
 import { Delayer } from '../utils/async';
 import { disposeAll } from '../utils/dispose';
 import * as languageModeIds from '../utils/languageModeIds';
+import API from '../utils/api';
 
 
 interface IDiagnosticRequestor {
@@ -41,18 +42,18 @@ class SyncedBuffer {
 			fileContent: this.document.getText(),
 		};
 
-		if (this.client.apiVersion.has203Features()) {
+		if (this.client.apiVersion.gte(API.v203)) {
 			const scriptKind = mode2ScriptKind(this.document.languageId);
 			if (scriptKind) {
 				args.scriptKindName = scriptKind;
 			}
 		}
 
-		if (this.client.apiVersion.has230Features()) {
+		if (this.client.apiVersion.gte(API.v230)) {
 			args.projectRootPath = this.client.getWorkspaceRootForResource(this.document.uri);
 		}
 
-		if (this.client.apiVersion.has240Features()) {
+		if (this.client.apiVersion.gte(API.v240)) {
 			const tsPluginsForDocument = this.client.plugins
 				.filter(x => x.languages.indexOf(this.document.languageId) >= 0);
 
@@ -147,7 +148,6 @@ export default class BufferSyncSupport {
 
 	private _validate: boolean;
 	private readonly modeIds: Set<string>;
-	private readonly diagnostics: Diagnostics;
 	private readonly disposables: Disposable[] = [];
 	private readonly syncedBuffers: SyncedBufferMap;
 
@@ -158,18 +158,19 @@ export default class BufferSyncSupport {
 	constructor(
 		client: ITypeScriptServiceClient,
 		modeIds: string[],
-		diagnostics: Diagnostics,
 		validate: boolean
 	) {
 		this.client = client;
 		this.modeIds = new Set<string>(modeIds);
-		this.diagnostics = diagnostics;
 		this._validate = validate;
 
 		this.diagnosticDelayer = new Delayer<any>(300);
 
 		this.syncedBuffers = new SyncedBufferMap(path => this.client.normalizePath(path));
 	}
+
+	private readonly _onDelete = new EventEmitter<Uri>();
+	public readonly onDelete = this._onDelete.event;
 
 	public listen(): void {
 		workspace.onDidOpenTextDocument(this.openTextDocument, this, this.disposables);
@@ -194,6 +195,7 @@ export default class BufferSyncSupport {
 
 	public dispose(): void {
 		disposeAll(this.disposables);
+		this._onDelete.dispose();
 	}
 
 	public openTextDocument(document: TextDocument): void {
@@ -224,7 +226,7 @@ export default class BufferSyncSupport {
 		this.syncedBuffers.delete(resource);
 		syncedBuffer.close();
 		if (!fs.existsSync(resource.fsPath)) {
-			this.diagnostics.delete(resource);
+			this._onDelete.fire(resource);
 			this.requestAllDiagnostics();
 		}
 	}

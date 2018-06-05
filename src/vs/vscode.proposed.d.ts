@@ -11,46 +11,6 @@ declare module 'vscode' {
 		export function sampleFunction(): Thenable<any>;
 	}
 
-	//#region Joh: file system provider (OLD)
-
-	export enum DeprecatedFileChangeType {
-		Updated = 0,
-		Added = 1,
-		Deleted = 2
-	}
-	export interface DeprecatedFileChange {
-		type: DeprecatedFileChangeType;
-		resource: Uri;
-	}
-	export enum DeprecatedFileType {
-		File = 0,
-		Dir = 1,
-		Symlink = 2
-	}
-	export interface DeprecatedFileStat {
-		id: number | string;
-		mtime: number;
-		size: number;
-		type: DeprecatedFileType;
-	}
-	export interface DeprecatedFileSystemProvider {
-		readonly onDidChange?: Event<DeprecatedFileChange[]>;
-		utimes(resource: Uri, mtime: number, atime: number): Thenable<DeprecatedFileStat>;
-		stat(resource: Uri): Thenable<DeprecatedFileStat>;
-		read(resource: Uri, offset: number, length: number, progress: Progress<Uint8Array>): Thenable<number>;
-		write(resource: Uri, content: Uint8Array): Thenable<void>;
-		move(resource: Uri, target: Uri): Thenable<DeprecatedFileStat>;
-		mkdir(resource: Uri): Thenable<DeprecatedFileStat>;
-		readdir(resource: Uri): Thenable<[Uri, DeprecatedFileStat][]>;
-		rmdir(resource: Uri): Thenable<void>;
-		unlink(resource: Uri): Thenable<void>;
-	}
-	export namespace workspace {
-		export function registerDeprecatedFileSystemProvider(scheme: string, provider: DeprecatedFileSystemProvider): Disposable;
-	}
-
-	//#endregion
-
 	//#region Joh: remote, search provider
 
 	export interface TextSearchQuery {
@@ -66,10 +26,10 @@ declare module 'vscode' {
 		excludes: string[];
 		useIgnoreFiles?: boolean;
 		followSymlinks?: boolean;
-		previewOptions?: any; // total length? # of context lines? leading and trailing # of chars?
 	}
 
 	export interface TextSearchOptions extends SearchOptions {
+		previewOptions?: any; // total length? # of context lines? leading and trailing # of chars?
 		maxFileSize?: number;
 		encoding?: string;
 	}
@@ -337,6 +297,80 @@ declare module 'vscode' {
 
 	//#endregion
 
+	//#region Comments
+	/**
+	 * Comments provider related APIs are still in early stages, they may be changed significantly during our API experiments.
+	 */
+
+	interface CommentInfo {
+		threads: CommentThread[];
+		commentingRanges?: Range[];
+	}
+
+	export enum CommentThreadCollapsibleState {
+		/**
+		 * Determines an item is collapsed
+		 */
+		Collapsed = 0,
+		/**
+		 * Determines an item is expanded
+		 */
+		Expanded = 1
+	}
+
+	interface CommentThread {
+		threadId: string;
+		resource: Uri;
+		range: Range;
+		comments: Comment[];
+		collapsibleState?: CommentThreadCollapsibleState;
+	}
+
+	interface Comment {
+		commentId: string;
+		body: MarkdownString;
+		userName: string;
+		gravatar: string;
+		command?: Command;
+	}
+
+	export interface CommentThreadChangedEvent {
+		/**
+		 * Added comment threads.
+		 */
+		readonly added: CommentThread[];
+
+		/**
+		 * Removed comment threads.
+		 */
+		readonly removed: CommentThread[];
+
+		/**
+		 * Changed comment threads.
+		 */
+		readonly changed: CommentThread[];
+	}
+
+	interface DocumentCommentProvider {
+		provideDocumentComments(document: TextDocument, token: CancellationToken): Promise<CommentInfo>;
+		createNewCommentThread?(document: TextDocument, range: Range, text: string, token: CancellationToken): Promise<CommentThread>;
+		replyToCommentThread?(document: TextDocument, range: Range, commentThread: CommentThread, text: string, token: CancellationToken): Promise<CommentThread>;
+		onDidChangeCommentThreads?: Event<CommentThreadChangedEvent>;
+	}
+
+	interface WorkspaceCommentProvider {
+		provideWorkspaceComments(token: CancellationToken): Promise<CommentThread[]>;
+		createNewCommentThread?(document: TextDocument, range: Range, text: string, token: CancellationToken): Promise<CommentThread>;
+		replyToCommentThread?(document: TextDocument, range: Range, commentThread: CommentThread, text: string, token: CancellationToken): Promise<CommentThread>;
+
+		onDidChangeCommentThreads?: Event<CommentThreadChangedEvent>;
+	}
+
+	namespace workspace {
+		export function registerDocumentCommentProvider(provider: DocumentCommentProvider): Disposable;
+		export function registerWorkspaceCommentProvider(provider: WorkspaceCommentProvider): Disposable;
+	}
+	//#endregion
 
 	//#region Terminal
 
@@ -351,7 +385,7 @@ declare module 'vscode' {
 
 	export namespace window {
 		/**
-		 * The currently active terminals or an empty array.
+		 * The currently opened terminals or an empty array.
 		 *
 		 * @readonly
 		 */
@@ -467,4 +501,40 @@ declare module 'vscode' {
 
 	//#endregion
 
+
+	//#region Matt: WebView Serializer
+
+	/**
+	 * Restore webview panels that have been persisted when vscode shuts down.
+	 */
+	interface WebviewPanelSerializer {
+		/**
+		 * Restore a webview panel from its seriailzed `state`.
+		 *
+		 * Called when a serialized webview first becomes visible.
+		 *
+		 * @param webviewPanel Webview panel to restore. The serializer should take ownership of this panel.
+		 * @param state Persisted state.
+		 *
+		 * @return Thanble indicating that the webview has been fully restored.
+		 */
+		deserializeWebviewPanel(webviewPanel: WebviewPanel, state: any): Thenable<void>;
+	}
+
+	namespace window {
+		/**
+		 * Registers a webview panel serializer.
+		 *
+		 * Extensions that support reviving should have an `"onWebviewPanel:viewType"` activation method and
+		 * make sure that [registerWebviewPanelSerializer](#registerWebviewPanelSerializer) is called during activation.
+		 *
+		 * Only a single serializer may be registered at a time for a given `viewType`.
+		 *
+		 * @param viewType Type of the webview panel that can be serialized.
+		 * @param serializer Webview serializer.
+		 */
+		export function registerWebviewPanelSerializer(viewType: string, serializer: WebviewPanelSerializer): Disposable;
+	}
+
+	//#endregion
 }
